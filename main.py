@@ -1,5 +1,6 @@
 import random
 import requests
+from datetime import datetime, date
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, ContextTypes
 
@@ -12,10 +13,13 @@ EMOJI_SYMBOLS = ["🍒", "🍋", "🔔", "7️⃣", "💎", "🍀"]
 # URL для получения случайных фото котиков
 CAT_API_URL = "https://api.thecatapi.com/v1/images/search"
 
+# Словарь для хранения статистики пользователей
+user_attempts = {}
+
 def get_main_keyboard():
     """Создаёт клавиатуру с кнопками для команд"""
     keyboard = [
-        [KeyboardButton("/start"), KeyboardButton("/spin")]
+        [KeyboardButton("🎰")]
     ]
     return ReplyKeyboardMarkup(
         keyboard,
@@ -23,18 +27,53 @@ def get_main_keyboard():
         one_time_keyboard=False  # Клавиатура остаётся после нажатия
     )
 
+def get_user_attempts(user_id):
+    """Получает количество попыток пользователя за текущий день"""
+    today = date.today()
+    user_data = user_attempts.get(user_id, {})
+    
+    if user_data.get('date') == today:
+        return user_data['attempts']
+    else:
+        # Если это новый день, сбрасываем счётчик
+        user_attempts[user_id] = {'date': today, 'attempts': 0}
+        return 0
+
+def increment_user_attempts(user_id):
+    """Увеличивает количество попыток пользователя"""
+    today = date.today()
+    if user_id not in user_attempts or user_attempts[user_id]['date'] != today:
+        user_attempts[user_id] = {'date': today, 'attempts': 1}
+    else:
+        user_attempts[user_id]['attempts'] += 1
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Создаём клавиатуру
     reply_markup = get_main_keyboard()
     
     await update.message.reply_text(
         "🎰 Добро пожаловать в слот-машину!\n"
-        "Нажми /spin, чтобы запустить барабаны.\n"
-        "Если выпадут три одинаковых символа — ты выиграл фото котика! 🐾",
+        "Нажми 🎰, чтобы запустить барабаны.\n"
+        "Если выпадут три одинаковых символа — ты выиграл фото котика! 🐾\n\n"
+        "У тебя 15 попыток в день.",
         reply_markup=reply_markup  # Добавляем клавиатуру к сообщению
     )
 
 async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    attempts = get_user_attempts(user_id)
+    
+    if attempts >= 15:
+        await update.message.reply_text(
+            "❌ У тебя закончились попытки на сегодня!\n"
+            "Возвращайся завтра для новых игр! 🕒"
+        )
+        return
+    
+    # Увеличиваем счётчик попыток
+    increment_user_attempts(user_id)
+    remaining_attempts = 15 - attempts - 1
+    
     # Выбираем 3 случайных эмодзи
     result = [random.choice(EMOJI_SYMBOLS) for _ in range(3)]
     
@@ -42,7 +81,10 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result_text = " | ".join(result)
     
     # Отправляем результат
-    await update.message.reply_text(f"🎰 {result_text} 🎰")
+    message_text = f"🎰 {result_text} 🎰\n"
+    message_text += f"Осталось попыток: {remaining_attempts}"
+    
+    await update.message.reply_text(message_text)
     
     # Проверяем выигрыш
     if result[0] == result[1] == result[2]:
@@ -62,7 +104,7 @@ async def spin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             print(f"Ошибка при загрузке фото: {e}")
             await update.message.reply_text("🎉 ПОБЕДА! Но фото котика не загрузилось. Попробуй ещё раз!")
     else:
-        await update.message.reply_text("Увы, не повезло. Попробуй ещё раз! /spin")
+        await update.message.reply_text("Увы, не повезло. Попробуй ещё раз!")
 
 def main():
     application = Application.builder().token(TOKEN).build()
